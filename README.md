@@ -1,7 +1,5 @@
-<<<<<<< HEAD
 # energy-dashboard
 Reconciliation of Parent node Vs Child node in real time thro MQTT
-=======
 # Objective
 THe purpose of this dashboard to understand the Energy values aggregated for a time window for an Energy tree to understand reconciliated value between the Parent and its respctive children values from the real time data of Respective energy meter nodes ,received thro MQTT Broker .
 Once the meter nodes are selected in drop down the processing starts and displays the processed data for the past 15 minutes from the moment the selection is made in the drop down.
@@ -19,4 +17,3 @@ A real-time energy dashboard using Flask + Dash + MQTT. Visualizes parent-child 
 ```bash
 pip install -r requirements.txt
 python app.py
->>>>>>> 6a3b248d3435927e4ea794cdc63c0082254acde7

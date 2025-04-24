@@ -8,11 +8,12 @@
     <h2>Select a Parent Node</h2>
     <form action="/set_parent" method="post">
         <label for="parent_node">Parent Node:</label>
-        <select name="parent_node" id="parent_node">
-            {% for node_id, node_name in parent_nodes.items() %}
-                <option value="{{ node_id }}">{{ node_name }} (ID: {{ node_id }})</option>
+        <select name="parent_node">
+            {% for meter_id, name in parent_nodes.items() %}
+              <option value="{{ meter_id }}">{{ meter_id }} - {{ name }}</option>
             {% endfor %}
-        </select>
+          </select>
+          
         <br><br>
         <input type="submit" value="View Energy Graph">
     </form>

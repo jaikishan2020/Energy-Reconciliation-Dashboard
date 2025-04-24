@@ -14,7 +14,7 @@ import uuid
 
 # Load static files
 df_parent_child = pd.read_excel("Parent_Child_ID_Mapping.xlsx", usecols=["Parent Node ID", "Child Node ID"])
-df_meters = pd.read_csv("mMeters.csv")
+df_meters = pd.read_excel("mMeters_AMRDatalog_VICTUS.xlsx")
 
 # Initialize app
 server = Flask(__name__, template_folder='templates', static_folder='static')
@@ -26,6 +26,23 @@ df = pd.DataFrame(columns=columns)
 lock = threading.Lock()
 # Aggregation time in minutes
 aggregation_time = 15
+
+def validate_mapping(df_meters, df_parent_child):
+    meter_ids = set(df_meters["MeterID"])
+    amr_ids = set(df_meters["AMR_MeterID"])
+    parent_ids = set(df_parent_child["Parent Node ID"])
+    child_ids = set(df_parent_child["Child Node ID"])
+    all_tree_ids = parent_ids.union(child_ids)
+    
+    missing_in_meters = all_tree_ids - meter_ids
+    if missing_in_meters:
+        print(f"⚠️ These tree nodes are missing in df_meters['MeterID']: {missing_in_meters}")
+
+    return not missing_in_meters
+
+validate_mapping(df_meters, df_parent_child)
+
+
 
 @server.route("/")
 def index():
@@ -107,11 +124,12 @@ def update_graph(n, selected_parent):
         return [], {'name': 'preset'}, "Waiting for data..."
 
     latest_time = df["Date_time"].max()
-    start_time = latest_time - timedelta(minutes=aggregation_time)
+    start_time = latest_time - timedelta(minutes=aggregation_time+1)
     df_filtered = df[(df["Date_time"] >= start_time) & (df["Date_time"] <= latest_time)]
     df_agg = df_filtered.groupby("MeterID", as_index=False).agg({"Energy_Units": "sum"})
     print(f"✅ Live data received for parent meter {selected_parent}")
     print(f" Data aggregated from {start_time} to {latest_time} for Parent Node {selected_parent} ")
+    print(f"🔎 Filtered rows for aggregation: {len(df_filtered)}")
     print("📊 Aggregated Data:\n", df_agg[df_agg["MeterID"] == selected_parent])
 
 
@@ -138,8 +156,11 @@ def update_graph(n, selected_parent):
                 f"from {start_time.strftime('%H:%M')} to {latest_time.strftime('%H:%M')} "
                 f"on {start_time.strftime('%d %b %Y')}"
             )
-    print("🧪 Parent node element:", elements[0])
-    print("🧪 Parent node element:", elements[-1])
+    if elements:
+        print("🧪 Parent node element:", elements[0])
+        print("🧪 Parent node element:", elements[-1])
+    else:
+        print("⚠️ No elements to render yet. Possibly waiting for incoming MQTT data.")
 
     return elements, layout, title_text
 
@@ -159,7 +180,18 @@ def update_dataframe(xml_message):
     global df
     parsed = parse_xml_message(xml_message)
     if parsed:
-        dt, meter_id, value = parsed
+        dt, amr_meter_id, value = parsed
+        try:
+            # Map AMR_MeterID to local MeterID
+            meter_match = df_meters[df_meters["AMR_MeterID"] == amr_meter_id]
+            if meter_match.empty:
+                print(f"⚠️ AMR_MeterID {amr_meter_id} not found in mapping.")
+                return
+            meter_id = int(meter_match["MeterID"].values[0])  # get corresponding MeterID
+        except Exception as e:
+            print(f"Error mapping AMR_MeterID: {e}")
+            return
+
         prev = df[df["MeterID"] == meter_id].sort_values("Date_time").tail(1)
         energy = value - prev["Value"].values[0] if not prev.empty else 0
         row = pd.DataFrame([[dt, meter_id, value, energy]], columns=df.columns)
@@ -168,6 +200,7 @@ def update_dataframe(xml_message):
             df = pd.concat([df, row], ignore_index=True).sort_values(by=["MeterID", "Date_time"])
         print(df.head(5))
         print(df.tail(5))
+
 
 def get_subtree_links(parent_id):
     visited = set()
@@ -211,6 +244,15 @@ def build_elements(df_agg, selected_parent=None):
         meter_row = df_meters[df_meters["MeterID"] == node_id_int]
         meter_name = meter_row["Name"].values[0] if not meter_row.empty else f"Meter {node_id_str}"
         actual = df_agg[df_agg["MeterID"] == int(node_id)]["Energy_Units"].sum()
+        print(f"🔍 Node {node_id}: actual={actual:.2f}")
+        if node_id_int in df_parent_child["Parent Node ID"].values:
+            try:
+                print(f"   ↪ Children: {child_ids} | sum={child_sum:.2f}")
+            except Exception as e:
+                print(f"[WARN] Could not compute children for node {node_id_int}: {e}")
+                child_ids = []
+                child_sum = 0
+
 
     
         label = f"{meter_name}" f"\nID:{node_id_str}" f"\nActual: {actual:.2f}"
@@ -219,8 +261,16 @@ def build_elements(df_agg, selected_parent=None):
         height_style = {}
 
         if node_id_int in df_parent_child["Parent Node ID"].values:
-            child_ids = df_parent_child[df_parent_child["Parent Node ID"] == node_id_int]["Child Node ID"].tolist()
-            child_sum = df_agg[df_agg["MeterID"].isin(child_ids)]["Energy_Units"].sum()
+            try:
+                child_ids = df_parent_child[df_parent_child["Parent Node ID"] == node_id_int]["Child Node ID"].tolist()
+                child_sum = df_agg[df_agg["MeterID"].isin(child_ids)]["Energy_Units"].sum()
+                print(f"   ↪ Children: {child_ids} | sum={child_sum:.2f}")  # <- moved AFTER definition
+
+            except Exception as e:
+                print(f"[WARN] Could not compute children for node {node_id_int}: {e}")
+                child_ids = []
+                child_sum = 0
+
             reconciliation = ((actual - child_sum) / child_sum * 100) if child_sum else 0
             label += f"\nExpected: {child_sum:.2f}" f"\nRecon: {reconciliation:.2f}%"
             print(f"🟨 Color decision — Parent ID: {node_id_int}, Actual: {actual:.2f}, Expected: {child_sum:.2f}")
@@ -230,7 +280,7 @@ def build_elements(df_agg, selected_parent=None):
                 color = "yellow"
             elif actual < child_sum:
                 color = "red"
-            else:
+            else    :
                 color = "blue"
 
             print(f"🎨 Final color for parent node {node_id_int}: {color}")
