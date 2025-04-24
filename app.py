@@ -13,8 +13,8 @@ import json
 import uuid
 
 # Load static files
-df_parent_child = pd.read_excel("Parent_Child_ID_Mapping.xlsx", usecols=["Parent Node ID", "Child Node ID"])
-df_meters = pd.read_excel("mMeters_AMRDatalog_VICTUS.xlsx")
+df_parent_child = pd.read_excel("data/Parent_Child_ID_Mapping.xlsx", usecols=["Parent Node ID", "Child Node ID"])
+df_meters = pd.read_excel("data/mMeters_AMRDatalog_VICTUS.xlsx")
 
 # Initialize app
 server = Flask(__name__, template_folder='templates', static_folder='static')
